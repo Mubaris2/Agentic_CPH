@@ -1,6 +1,10 @@
-fastapi==0.95.2
-pydantic==1.10.13
-uvicorn==0.23.2
-streamlit
-requests
-python-dotenv
+fastapi
+uvicorn[standard]
+pydantic
+aiohttp
+redis
+sqlalchemy
+databases
+typing-extensions
+httpx
+psycopg[binary]

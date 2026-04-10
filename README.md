@@ -1,92 +1,42 @@
-# Agentic Competitive Programming Coach (MVP)
+# LangGraph CP Assistant — Minimal Implementation
 
-A modular multi-agent AI coach for competitive programming practice.
+This repository contains a minimal, runnable scaffold implementing the LangGraph-based agent system described in `LANGGRAPH_AGENT_SYSTEM_ARCHITECTURE.md`.
 
-## Tech Stack
-- Backend: FastAPI + SQLite
-- Frontend: Streamlit
-- LLM: OpenAI-compatible Chat Completions API via configurable environment variables
-
-## Project Structure
-
-- backend/main.py
-- backend/agents/
-  - code_analyzer.py
-  - complexity_agent.py
-  - pattern_agent.py
-  - strategy_agent.py
-  - hint_agent.py
-  - thinking_agent.py
-  - evaluation_agent.py
-  - summary_agent.py
-- backend/services/
-  - agent_orchestrator.py
-  - memory_service.py
-  - scoring_service.py
-- backend/models/schemas.py
-- backend/db/storage.py
-- frontend/app.py
-
-## Environment Variables
-
-Optional (for LLM-powered responses in strategy/hint/thinking/summary agents):
-
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
-- `OPENAI_MODEL` (default: `gpt-4o-mini`)
-
-Optional database path:
-
-- `COACH_DB_PATH` (default: `db/coach.db`, relative to backend working directory)
-
-Frontend backend URL:
-
-- `BACKEND_URL` (default: `http://localhost:8000`)
-
-## Run Instructions
-
-Install dependencies from project root:
+Quick start (create virtualenv and install):
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
+
+API:
+- `POST /api/chat` JSON {"user_input": "...", "code": "..."}
+
+This demo uses fallbacks for Redis/Postgres: it will attempt to connect if `REDIS_URL`/`DATABASE_URL` are set, otherwise will use in-memory/session-only stores for demo.
+
+Files of interest:
+- `app/models.py` — Pydantic state schema
+- `app/nodes.py` — node implementations
+- `app/graph.py` — simple LangGraph-like runner
+- `app/main.py` — FastAPI app and /api/chat endpoint
+
+Frontend (Next.js)
+- `web/` contains a minimal Next.js app that talks to the backend at `http://localhost:8000`.
 
 Run backend:
 
 ```bash
-cd backend
-uvicorn main:app --reload
+uvicorn app.main:app --reload
 ```
 
-Run frontend (new terminal):
+Run frontend (from `web/`):
 
 ```bash
-cd frontend
-streamlit run app.py
+cd web
+npm install
+npm run dev
 ```
 
-## API
-
-### `POST /analyze`
-Input:
-
-```json
-{
-  "code": "...",
-  "problem_description": "...",
-  "is_correct": true,
-  "used_hints": false
-}
-```
-
-Output: combined response from all 8 agents.
-
-### `GET /progress`
-Returns:
-- past scores
-- average score
-- basic insights
-
-## Notes
-- If no API key is configured, agents use deterministic fallback heuristics.
-- Session data is stored in SQLite for simple progress tracking.
+Note: models placeholders are left as `<TO_BE_FILLED>` in node metadata to match the architecture spec.
