@@ -38,6 +38,7 @@ async def startup_event():
     g.add_node("code_analyzer", nodes.code_analyzer_node)
     g.add_node("approach_detection", nodes.approach_detection_node)
     g.add_node("approach_validator", nodes.approach_validator_node)
+    g.add_node("counterexample_gen", nodes.counterexample_gen_node)
     g.add_node("hint_agent", nodes.hint_agent_node)
     g.add_node("strategy_agent", nodes.strategy_agent_node)
     g.add_node("response_aggregator", nodes.response_aggregator_node)
@@ -57,9 +58,13 @@ async def startup_event():
     g.add_edge("debug_fork", "code_analyzer")
     g.add_edge("code_analyzer", "approach_detection")
     g.add_edge("approach_detection", "approach_validator")
+    g.add_conditional_edges("approach_validator", lambda s: "counterexample" if ((s.get("validation_result") or {}).get("trigger_counterexample") if isinstance(s.get("validation_result"), dict) else getattr(s.get("validation_result"), "trigger_counterexample", False)) else "aggregate", {
+        "counterexample": "counterexample_gen",
+        "aggregate": "response_aggregator",
+    })
+    g.add_edge("counterexample_gen", "response_aggregator")
     g.add_edge("hint_agent", "response_aggregator")
     g.add_edge("strategy_agent", "response_aggregator")
-    g.add_edge("approach_validator", "response_aggregator")
     g.add_edge("problem_fetch_tool", "orchestrator")
     g.add_edge("response_aggregator", "END")
 
@@ -93,7 +98,7 @@ async def chat(req: ChatRequest):
     # load prior session context (best-effort)
     prior = await session_store.get(session_id)
     if prior:
-        for key in ["problem_context", "expected_approach", "strategy", "hints"]:
+        for key in ["problem_context", "expected_approach", "strategy", "hints", "counterexample"]:
             current_val = state.get(key)
             if key in prior and (current_val in (None, "", [], {}) or current_val is None):
                 val = prior[key]

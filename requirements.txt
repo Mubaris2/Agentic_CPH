@@ -8,3 +8,4 @@ databases
 typing-extensions
 httpx
 psycopg[binary]
+openai

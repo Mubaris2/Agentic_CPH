@@ -57,6 +57,7 @@ class CPAssistantState(TypedDict, total=False):
     validation_result: ValidationResult
     hints: List[HintItem]
     strategy: StrategyResult
+    counterexample: str
     final_response: str
     intermediate_steps: List[IntermediateStep]
 
@@ -75,6 +76,7 @@ def init_state(user_input: str, code: Optional[str] = None) -> CPAssistantState:
         "validation_result": ValidationResult(),
         "hints": [],
         "strategy": StrategyResult(),
+        "counterexample": "",
         "final_response": "",
         "intermediate_steps": [],
     }
