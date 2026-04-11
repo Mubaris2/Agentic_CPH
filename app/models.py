@@ -47,10 +47,12 @@ class IntermediateStep(BaseModel):
 class CPAssistantState(TypedDict, total=False):
     user_input: str
     code: Optional[str]
+    user_data: Dict[str, Any]
     intent: IntentLabel
     next_node: str
     problem_fetch_attempted: bool
     problem_context: ProblemContext
+    problem_candidates: List[Dict[str, Any]]
     analysis_result: AnalysisResult
     detected_approach: ApproachLabel
     expected_approach: ApproachLabel
@@ -62,14 +64,16 @@ class CPAssistantState(TypedDict, total=False):
     intermediate_steps: List[IntermediateStep]
 
 
-def init_state(user_input: str, code: Optional[str] = None) -> CPAssistantState:
+def init_state(user_input: str, code: Optional[str] = None, user_data: Optional[Dict[str, Any]] = None) -> CPAssistantState:
     return {
         "user_input": user_input,
         "code": code,
+        "user_data": user_data or {},
         "intent": "general",
         "next_node": "",
         "problem_fetch_attempted": False,
         "problem_context": ProblemContext(),
+        "problem_candidates": [],
         "analysis_result": AnalysisResult(),
         "detected_approach": "unknown",
         "expected_approach": "unknown",

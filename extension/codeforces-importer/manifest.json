@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "CPH Codeforces Importer",
+  "version": "1.0.0",
+  "description": "Two-click Codeforces problem importer for CPH workspace",
+  "permissions": ["activeTab", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://codeforces.com/*",
+    "https://www.codeforces.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "action": {
+    "default_title": "CPH Import",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://codeforces.com/*", "https://www.codeforces.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -2,6 +2,8 @@ fastapi
 uvicorn[standard]
 pydantic
 aiohttp
+beautifulsoup4
+playwright
 redis
 sqlalchemy
 databases

@@ -32,6 +32,7 @@ Thumbs.db
 
 # Logs
 *.log
+cache/
 
 # Node (web/)
 /web/node_modules/
@@ -52,3 +53,14 @@ Thumbs.db
 *.db
 coverage/
 coverage.*
+
+# Temporary CF/CFTOOL and other runtime dirs
+.tmp*
+.tmp_cftool*
+
+# Local database
+cp_assistant.db
+
+# IDE / OS extras
+.DS_Store
+Thumbs.db

@@ -68,10 +68,10 @@ async def orchestrator_node(state: CPAssistantState) -> Dict[str, Any]:
         intent = "general"
         if "hint" in lower_ui:
             intent = "hint"
+        elif any(token in lower_ui for token in ["random problem", "find problem", "fetch problem", "codeforces", "question", "problem"]):
+            intent = "problem_fetch"
         elif "strategy" in lower_ui or "optimiz" in lower_ui:
             intent = "strategy"
-        elif "codeforces" in lower_ui or "contest" in lower_ui:
-            intent = "problem_fetch" if (not problem_fetch_attempted and not has_problem_context) else "strategy"
         elif state.get("code"):
             intent = "debug"
     else:
@@ -95,7 +95,7 @@ async def orchestrator_node(state: CPAssistantState) -> Dict[str, Any]:
         intent = _normalize_intent(parse_json_object(raw).get("intent", "general"))
 
     if intent == "problem_fetch" and (problem_fetch_attempted or has_problem_context):
-        intent = "strategy"
+        intent = "general"
 
     step = IntermediateStep(node="orchestrator", summary="intent classified", payload={"intent": intent})
     return {"intent": intent, "next_node": "", "intermediate_steps": [step]}
@@ -343,6 +343,8 @@ async def response_aggregator_node(state: CPAssistantState) -> Dict[str, Any]:
     strategy_payload = _obj_to_dict(strategy)
     validation_payload = _obj_to_dict(vr)
     counterexample = state.get("counterexample", "")
+    problem_context = _obj_to_dict(state.get("problem_context"))
+    problem_candidates = state.get("problem_candidates") or []
 
     if not settings.OXLO_API_KEY:
         lines = []
@@ -354,6 +356,10 @@ async def response_aggregator_node(state: CPAssistantState) -> Dict[str, Any]:
             lines.append("Hints: " + " | ".join([t for t in hint_texts if t]))
         if validation_payload.get("status") == "mismatch" and counterexample:
             lines.append(f"Counterexample: {counterexample}")
+        if problem_context.get("title"):
+            lines.append(f"Problem: {problem_context}")
+        if problem_candidates:
+            lines.append(f"Candidates: {problem_candidates[:5]}")
         final = "\n\n".join(lines) if lines else "No actionable output."
     else:
         prompt = (
@@ -366,7 +372,9 @@ async def response_aggregator_node(state: CPAssistantState) -> Dict[str, Any]:
             f"Strategy: {strategy_payload}\n"
             f"Hints: {hint_texts}\n"
             f"Validation: {validation_payload}\n"
-            f"Counterexample: {counterexample}"
+            f"Counterexample: {counterexample}\n"
+            f"Problem Context: {problem_context}\n"
+            f"Problem Candidates: {problem_candidates[:10]}"
         )
         final = await chat_completion(
             NODE_MODELS["response_aggregator"],
@@ -383,6 +391,18 @@ async def response_aggregator_node(state: CPAssistantState) -> Dict[str, Any]:
 
 async def problem_fetch_tool_node(state: CPAssistantState) -> Dict[str, Any]:
     ui = state.get("user_input", "")
-    pc: ProblemContext = await fetch_codeforces_problem(ui)
-    step = IntermediateStep(node="problem_fetch_tool", summary="fetched problem", payload={"has_problem": bool(pc.title)})
-    return {"problem_context": pc, "problem_fetch_attempted": True, "intermediate_steps": [step]}
+    fetch_result = await fetch_codeforces_problem(ui, user_data=state.get("user_data") or {})
+    pc: ProblemContext = fetch_result.get("problem_context", ProblemContext())
+    candidates = fetch_result.get("candidates", [])
+    mode = fetch_result.get("mode", "none")
+    step = IntermediateStep(
+        node="problem_fetch_tool",
+        summary="fetched problem",
+        payload={"has_problem": bool(pc.title), "mode": mode, "candidate_count": len(candidates)},
+    )
+    return {
+        "problem_context": pc,
+        "problem_candidates": candidates,
+        "problem_fetch_attempted": True,
+        "intermediate_steps": [step],
+    }

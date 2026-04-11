@@ -41,9 +41,15 @@ export default function Home() {
   ])
   const [activeCaseId, setActiveCaseId] = useState(1)
   const [expanded, setExpanded] = useState({ description: true, constraints: true, examples: true })
+  const [problem, setProblem] = useState(problemData)
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isFetchModalOpen, setIsFetchModalOpen] = useState(false)
+  const [fetchError, setFetchError] = useState('')
+  const [problemUrl, setProblemUrl] = useState('https://codeforces.com/problemset/problem/4/A')
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [lastSeenImportId, setLastSeenImportId] = useState('')
 
   const layoutLeftWidth = rightPanelOpen ? leftWidth : 100
 
@@ -149,11 +155,98 @@ export default function Home() {
 
   async function copyExample() {
     try {
-      await navigator.clipboard.writeText(problemData.examples)
+      await navigator.clipboard.writeText(problem.examples)
     } catch {
       return
     }
   }
+
+  function openCodeforcesLogin() {
+    window.open('https://codeforces.com/enter', '_blank')
+  }
+
+  function openCodeforcesProblem() {
+    setFetchError('')
+    const url = problemUrl.trim()
+    const pattern = /^https:\/\/(www\.)?codeforces\.com\/(contest|problemset\/problem)\/\d+\/(problem\/)?[A-Za-z][A-Za-z0-9]*/
+    if (!pattern.test(url)) {
+      setFetchError('Enter a valid Codeforces problem URL.')
+      return
+    }
+    window.open(url, '_blank')
+  }
+
+  function problemIdFromUrl(url) {
+    const match = url.match(/https:\/\/(?:www\.)?codeforces\.com\/(?:contest|problemset\/problem)\/(\d+)\/(?:problem\/)?([A-Za-z][A-Za-z0-9]*)/)
+    if (!match) return ''
+    return `${match[1]}_${match[2].toUpperCase()}`
+  }
+
+  function applyImportedProblem(imported) {
+    if (!imported) return
+    const next = {
+      title: imported.title || imported.id || 'Imported Problem',
+      difficulty: imported.rating ? (imported.rating <= 1200 ? 'Easy' : imported.rating <= 1700 ? 'Medium' : 'Hard') : 'Medium',
+      tags: imported.tags?.length ? imported.tags : ['Codeforces'],
+      description: imported.statement || 'Statement not available',
+      constraints: imported.constraints || 'Constraints not explicitly listed in statement.',
+      examples: (imported.examples || [])
+        .map((example, index) => `Example ${index + 1}\nInput:\n${example.input || ''}\nOutput:\n${example.output || ''}`)
+        .join('\n\n') || imported.source_url || 'N/A'
+    }
+    setProblem(next)
+    setExpanded({ description: true, constraints: true, examples: true })
+  }
+
+  async function syncLatestImportedProblem(options = { silent: false, closeOnSuccess: false }) {
+    const { silent, closeOnSuccess } = options
+    if (!silent) setSyncLoading(true)
+    try {
+      const expectedId = problemIdFromUrl(problemUrl.trim())
+      let imported = null
+
+      if (expectedId) {
+        const byIdRes = await fetch(`http://localhost:8000/api/problems/import/${encodeURIComponent(expectedId)}`)
+        if (!byIdRes.ok) throw new Error('Unable to read imported problem by id')
+        const byIdData = await byIdRes.json()
+        imported = byIdData?.item
+      }
+
+      if (!imported) {
+        const res = await fetch('http://localhost:8000/api/problems/import/latest')
+        if (!res.ok) throw new Error('Unable to read latest imported problem')
+        const data = await res.json()
+        imported = data?.item
+      }
+
+      if (!imported?.id) {
+        if (!silent) setFetchError('No imported problem found yet.')
+        return
+      }
+      if (imported.id === lastSeenImportId) {
+        if (!silent) setFetchError('No new imported problem yet. Import from extension then retry.')
+        return
+      }
+      applyImportedProblem(imported)
+      setLastSeenImportId(imported.id)
+      setFetchError('')
+      if (closeOnSuccess) setIsFetchModalOpen(false)
+    } catch (error) {
+      if (!silent) setFetchError(String(error))
+    } finally {
+      if (!silent) setSyncLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isFetchModalOpen) return
+
+    const poll = window.setInterval(() => {
+      syncLatestImportedProblem({ silent: true, closeOnSuccess: true })
+    }, 2500)
+
+    return () => window.clearInterval(poll)
+  }, [isFetchModalOpen, lastSeenImportId, problemUrl])
 
   function streamAssistantResponse(prompt) {
     setIsTyping(true)
@@ -245,10 +338,14 @@ export default function Home() {
               <div className="h-full flex flex-col gap-2">
                 <div className="min-h-0" style={{ height: `${rightTopHeight}%` }}>
                   <ProblemPanel
-                    problem={problemData}
+                    problem={problem}
                     expanded={expanded}
                     onToggleSection={toggleSection}
                     onCopyExample={copyExample}
+                    onOpenFetch={() => {
+                      setFetchError('')
+                      setIsFetchModalOpen(true)
+                    }}
                   />
                 </div>
 
@@ -270,6 +367,80 @@ export default function Home() {
           </>
         )}
       </div>
+
+      {isFetchModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm grid place-items-center p-4">
+          <div className="panel-shell w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-100">Fetch Codeforces Problem</h3>
+              <button
+                onClick={() => setIsFetchModalOpen(false)}
+                className="text-xs px-2 py-1 rounded-lg border border-border bg-slate-700/60 hover:bg-slate-600/80 transition"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 overflow-auto scrollbar-thin space-y-4">
+              <div className="border border-border rounded-lg p-3 bg-slate-800/60 space-y-3">
+                <p className="text-xs text-slate-300 font-medium">Step 1: Open Codeforces Problem</p>
+                <p className="text-xs text-slate-400">
+                  Paste a Codeforces problem URL and open it. This is click one.
+                </p>
+                <div className="flex flex-col md:flex-row gap-2">
+                  <input
+                    value={problemUrl}
+                    onChange={(e) => setProblemUrl(e.target.value)}
+                    placeholder="https://codeforces.com/problemset/problem/4/A"
+                    className="flex-1 rounded-lg bg-slate-700/60 border border-border px-2 py-1.5 text-xs outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={openCodeforcesProblem}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-border bg-indigo-600 hover:bg-indigo-500 transition"
+                  >
+                    Open Problem
+                  </button>
+                </div>
+              </div>
+
+              {fetchError && <p className="text-xs text-red-300">{fetchError}</p>}
+
+              <div className="border border-emerald-500/30 bg-emerald-500/10 rounded-lg p-3 space-y-2">
+                <p className="text-xs text-emerald-200 font-medium">Step 2: Use Browser Extension</p>
+                <p className="text-xs text-emerald-100/90">
+                  On the opened Codeforces tab, click the CPH extension icon and press Import Current Problem.
+                </p>
+                <p className="text-xs text-slate-300">
+                  Extension folder: <span className="font-mono">extension/codeforces-importer</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => syncLatestImportedProblem({ silent: false, closeOnSuccess: true })}
+                  disabled={syncLoading}
+                  className="text-xs px-2 py-1 rounded-lg border border-border bg-emerald-700/40 hover:bg-emerald-700/60 disabled:opacity-60 transition"
+                >
+                  {syncLoading ? 'Syncing...' : 'Sync Imported Problem'}
+                </button>
+              </div>
+
+              <div className="border border-border rounded-lg p-3 bg-slate-800/60 space-y-2">
+                <p className="text-xs text-slate-300 font-medium">First-time setup (once)</p>
+                <p className="text-xs text-slate-400">1) Open Chrome Extensions page and enable Developer mode.</p>
+                <p className="text-xs text-slate-400">2) Load unpacked extension from extension/codeforces-importer.</p>
+                <p className="text-xs text-slate-400">3) Optional: login to Codeforces in browser if needed.</p>
+                <button
+                  type="button"
+                  onClick={openCodeforcesLogin}
+                  className="text-xs px-2 py-1 rounded-lg border border-border bg-slate-700/60 hover:bg-slate-600/80 transition"
+                >
+                  Open Codeforces Login
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

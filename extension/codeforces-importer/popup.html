@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CPH Importer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>CPH Importer</h1>
+      <p class="hint">Use on an open Codeforces problem page.</p>
+
+      <label for="apiBase">Backend URL</label>
+      <input id="apiBase" type="text" placeholder="http://localhost:8000" />
+
+      <button id="importBtn" type="button">Import Current Problem</button>
+      <p id="status" class="status"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

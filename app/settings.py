@@ -7,6 +7,7 @@ class Settings:
     SESSION_TTL_SECONDS: int = int(os.getenv("SESSION_TTL_SECONDS", "86400"))
     OXLO_BASE_URL: str = os.getenv("OXLO_BASE_URL", "https://api.oxlo.ai/v1")
     OXLO_API_KEY: str | None = os.getenv("OXLO_API_KEY")
+    CODEFORCES_PROXY_URL: str | None = os.getenv("CODEFORCES_PROXY_URL")
 
     MODEL_INTENT_DETECTION: str = os.getenv("MODEL_INTENT_DETECTION", "Llama 3.2 3B")
     MODEL_HINT_AGENT: str = os.getenv("MODEL_HINT_AGENT", "Llama 3.1 8B")
