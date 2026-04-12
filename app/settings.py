@@ -1,5 +1,6 @@
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 
 class Settings:
     REDIS_URL: str | None = os.getenv("REDIS_URL")
@@ -10,8 +11,10 @@ class Settings:
     CODEFORCES_PROXY_URL: str | None = os.getenv("CODEFORCES_PROXY_URL")
 
     MODEL_INTENT_DETECTION: str = os.getenv("MODEL_INTENT_DETECTION", "Llama 3.2 3B")
-    MODEL_HINT_AGENT: str = os.getenv("MODEL_HINT_AGENT", "Llama 3.1 8B")
-    MODEL_CODE_ANALYZER: str = os.getenv("MODEL_CODE_ANALYZER", "Qwen 3 Coder 30B")
+    # MODEL_HINT_AGENT: str = os.getenv("MODEL_HINT_AGENT", "Llama 3.1 8B")
+    MODEL_HINT_AGENT: str = os.getenv("MODEL_HINT_AGENT", "Llama 3.2 3B")
+    # MODEL_CODE_ANALYZER: str = os.getenv("MODEL_CODE_ANALYZER", "Qwen 3 Coder 30B")
+    MODEL_CODE_ANALYZER: str = os.getenv("MODEL_CODE_ANALYZER", "Gemma 3 4B")
     MODEL_STRATEGY_AGENT: str = os.getenv("MODEL_STRATEGY_AGENT", "DeepSeek R1 8B")
     MODEL_APPROACH_DETECTOR: str = os.getenv("MODEL_APPROACH_DETECTOR", "DeepSeek R1 8B")
     MODEL_APPROACH_VALIDATOR: str = os.getenv("MODEL_APPROACH_VALIDATOR", "DeepSeek R1 8B")

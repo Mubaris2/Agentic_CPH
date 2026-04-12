@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,11 +7,10 @@ from uuid import uuid4
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime, timezone
 
-from .models import init_state, CPAssistantState, HintItem, ProblemContext, StrategyResult
-from .graph import StateGraph
-import app.nodes as nodes
 from .settings import settings
 from .store import SessionStore, HistoryStore
+from .llm import _chat_completion_sync
+from .code_runner import run_code
 from .tools import (
     search_codeforces_by_code_or_name,
     list_codeforces_by_topics,
@@ -23,6 +23,9 @@ from .problem_import_store import (
     load_latest_problem,
     load_problem,
 )
+from state import default_state, State
+from graph import build_graph
+from agents.common import ModelRegistry
 
 app = FastAPI(title="LangGraph CP Assistant - Demo")
 
@@ -81,6 +84,19 @@ class ImportedExample(BaseModel):
     output: str
 
 
+class RunTestCase(BaseModel):
+    id: int
+    input: str = ""
+    expected: str = ""
+
+
+class CodeRunRequest(BaseModel):
+    language: str
+    code: str
+    test_cases: list[RunTestCase]
+    timeout_seconds: int = 2
+
+
 class ImportProblemRequest(BaseModel):
     id: str
     platform: str = "codeforces"
@@ -100,46 +116,66 @@ class ImportProblemRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    # build graph
-    g = StateGraph()
-    # register nodes
-    g.add_node("orchestrator", nodes.orchestrator_node)
-    g.add_node("debug_fork", nodes.debug_fork_node)
-    g.add_node("code_analyzer", nodes.code_analyzer_node)
-    g.add_node("approach_detection", nodes.approach_detection_node)
-    g.add_node("approach_validator", nodes.approach_validator_node)
-    g.add_node("counterexample_gen", nodes.counterexample_gen_node)
-    g.add_node("hint_agent", nodes.hint_agent_node)
-    g.add_node("strategy_agent", nodes.strategy_agent_node)
-    g.add_node("response_aggregator", nodes.response_aggregator_node)
-    g.add_node("problem_fetch_tool", nodes.problem_fetch_tool_node)
+    model_diag = {
+        "api_key_configured": bool(settings.OXLO_API_KEY),
+        "calls": 0,
+        "success": 0,
+        "failure": 0,
+        "last_error": "",
+        "last_model": "",
+    }
 
-    # edges
-    g.add_edge("START", "orchestrator")
-    g.add_conditional_edges("orchestrator", lambda s: s.get("intent", "general"), {
-        "hint": "hint_agent",
-        "strategy": "strategy_agent",
-        "problem_fetch": "problem_fetch_tool",
-        "debug": "debug_fork",
-        "general": "debug_fork",
-    })
+    def _model_call(model_name: str, prompt: str, state: State) -> str:
+        _ = state
+        model_diag["calls"] += 1
+        model_diag["last_model"] = model_name
+        if not settings.OXLO_API_KEY:
+            model_diag["failure"] += 1
+            model_diag["last_error"] = "OXLO_API_KEY not configured"
+            return ""
+        try:
+            response = _chat_completion_sync(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a competitive programming assistant model."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=600,
+            )
+            model_diag["success"] += 1
+            model_diag["last_error"] = ""
+            return response
+        except Exception as error:
+            model_diag["failure"] += 1
+            model_diag["last_error"] = str(error)
+            return ""
 
-    g.add_edge("debug_fork", "strategy_agent")
-    g.add_edge("debug_fork", "code_analyzer")
-    g.add_edge("code_analyzer", "approach_detection")
-    g.add_edge("approach_detection", "approach_validator")
-    g.add_conditional_edges("approach_validator", lambda s: "counterexample" if ((s.get("validation_result") or {}).get("trigger_counterexample") if isinstance(s.get("validation_result"), dict) else getattr(s.get("validation_result"), "trigger_counterexample", False)) else "aggregate", {
-        "counterexample": "counterexample_gen",
-        "aggregate": "response_aggregator",
-    })
-    g.add_edge("counterexample_gen", "response_aggregator")
-    g.add_edge("hint_agent", "response_aggregator")
-    g.add_edge("strategy_agent", "response_aggregator")
-    g.add_edge("problem_fetch_tool", "orchestrator")
-    g.add_edge("response_aggregator", "END")
+    node_models = {
+        "orchestrator": ModelRegistry(
+            intent_model=lambda prompt, state: _model_call(settings.MODEL_INTENT_DETECTION, prompt, state),
+        ),
+        "code_analyzer": ModelRegistry(
+            code_model=lambda prompt, state: _model_call(settings.MODEL_CODE_ANALYZER, prompt, state),
+        ),
+        "approach_detection": ModelRegistry(
+            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_APPROACH_DETECTOR, prompt, state),
+        ),
+        "approach_validator": ModelRegistry(
+            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_APPROACH_VALIDATOR, prompt, state),
+        ),
+        "hint_agent": ModelRegistry(
+            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_HINT_AGENT, prompt, state),
+        ),
+        "strategy_agent": ModelRegistry(
+            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_STRATEGY_AGENT, prompt, state),
+        ),
+    }
+
+    g = build_graph(models=ModelRegistry(reasoning_model=lambda prompt, state: _model_call(settings.MODEL_GENERAL_CHAT, prompt, state)), node_models=node_models)
 
     # attach to app state
     app.state.graph = g
+    app.state.model_diagnostics = model_diag
 
     # stores
     session_store = SessionStore(settings.REDIS_URL, settings.SESSION_TTL_SECONDS)
@@ -163,33 +199,42 @@ async def chat(req: ChatRequest):
     session_store: SessionStore = app.state.session_store
     history_store: HistoryStore = app.state.history_store
 
-    state: CPAssistantState = init_state(req.user_input, req.code, req.user_data)
+    state: State = default_state(req.user_input, req.code)
+    if req.user_data and isinstance(req.user_data, dict):
+        incoming_context = req.user_data.get("problem_context")
+        if isinstance(incoming_context, dict):
+            state["problem_context"] = {
+                "title": str(incoming_context.get("title", "")),
+                "statement": str(incoming_context.get("statement", "")),
+                "constraints": str(incoming_context.get("constraints", "")),
+            }
 
     # load prior session context (best-effort)
     prior = await session_store.get(session_id)
-    if prior:
-        for key in ["problem_context", "problem_candidates", "expected_approach", "strategy", "hints", "counterexample"]:
-            current_val = state.get(key)
-            if key in prior and (current_val in (None, "", [], {}) or current_val is None):
-                val = prior[key]
-                if key == "problem_context" and isinstance(val, dict):
-                    state[key] = ProblemContext(**val)
-                elif key == "strategy" and isinstance(val, dict):
-                    state[key] = StrategyResult(**val)
-                elif key == "hints" and isinstance(val, list):
-                    state[key] = [HintItem(**item) if isinstance(item, dict) else item for item in val]
-                else:
-                    state[key] = val
+    recent_turns = history_store.get_recent_turns(session_id=session_id, limit=4)
+    state["memory_notes"] = [
+        f"User: {(turn.get('user_input') or '')[:90]} | Coach: {(turn.get('final_response') or '')[:90]}"
+        for turn in recent_turns
+        if isinstance(turn, dict)
+    ]
 
-    # run graph
-    g: StateGraph = app.state.graph
-    out = await g.run("START", state)
+    if isinstance(prior, dict):
+        previous_context = prior.get("problem_context")
+        if isinstance(previous_context, dict):
+            if not state.get("problem_context", {}).get("title"):
+                state["problem_context"] = previous_context
+        for key in ["expected_approach", "detected_approach", "strategy", "hints", "trainer_profile", "coaching_goal"]:
+            if key in prior and not state.get(key):
+                state[key] = prior[key]
+        old_notes = prior.get("memory_notes")
+        if isinstance(old_notes, list):
+            state["memory_notes"] = [*old_notes[-4:], *state.get("memory_notes", [])][-8:]
 
-    # ensure final aggregation if not present
-    if not out.get("final_response"):
-        # call aggregator
-        agg = await nodes.response_aggregator_node(out)
-        out.update(agg)
+    # run graph (compiled LangGraph invoke is sync)
+    g = app.state.graph
+    out = await asyncio.to_thread(g.invoke, state)
+
+    out["model_usage"] = dict(getattr(app.state, "model_diagnostics", {}))
 
     # persist current state
     encoded_state = jsonable_encoder(out)
@@ -205,8 +250,26 @@ async def chat(req: ChatRequest):
     return {
         "session_id": session_id,
         "final_response": out.get("final_response"),
+        "model_usage": out.get("model_usage", {}),
         "state": encoded_state,
         "recent_history": history_store.get_recent_turns(session_id=session_id, limit=3),
+    }
+
+
+@app.get("/api/debug/model-map")
+async def debug_model_map():
+    return {
+        "api_key_configured": bool(settings.OXLO_API_KEY),
+        "models": {
+            "orchestrator": settings.MODEL_INTENT_DETECTION,
+            "code_analyzer": settings.MODEL_CODE_ANALYZER,
+            "approach_detection": settings.MODEL_APPROACH_DETECTOR,
+            "approach_validator": settings.MODEL_APPROACH_VALIDATOR,
+            "hint_agent": settings.MODEL_HINT_AGENT,
+            "strategy_agent": settings.MODEL_STRATEGY_AGENT,
+            "response_aggregator": settings.MODEL_GENERAL_CHAT,
+        },
+        "diagnostics": getattr(app.state, "model_diagnostics", {}),
     }
 
 
@@ -291,3 +354,15 @@ async def get_imported_problem(problem_id: str):
 async def latest_imported_problem():
     item = load_latest_problem()
     return {"item": item}
+
+
+@app.post("/api/code/run")
+async def code_run(req: CodeRunRequest):
+    result = await asyncio.to_thread(
+        run_code,
+        req.language,
+        req.code,
+        [case.model_dump() for case in req.test_cases],
+        max(1, min(req.timeout_seconds, 8)),
+    )
+    return result

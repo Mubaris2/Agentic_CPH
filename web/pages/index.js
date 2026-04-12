@@ -5,14 +5,12 @@ import ProblemPanel from '../components/ProblemPanel'
 import ChatPanel from '../components/ChatPanel'
 
 const problemData = {
-  title: 'Two Sum',
-  difficulty: 'Easy',
-  tags: ['Arrays', 'Hash Map'],
-  description:
-    'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target. You may assume each input would have exactly one solution, and you may not use the same element twice.',
-  constraints: '2 ≤ nums.length ≤ 10^4\n-10^9 ≤ nums[i] ≤ 10^9\n-10^9 ≤ target ≤ 10^9\nOnly one valid answer exists.',
-  examples:
-    'Input: nums = [2,7,11,15], target = 9\nOutput: [0,1]\n\nInput: nums = [3,2,4], target = 6\nOutput: [1,2]'
+  title: 'No problem loaded',
+  difficulty: 'Medium',
+  tags: ['Fetch Required'],
+  description: 'Fetch/import a problem first to start solving.',
+  constraints: 'No constraints available until a problem is fetched.',
+  examples: 'No examples available until a problem is fetched.'
 }
 
 const starterCode = {
@@ -35,11 +33,8 @@ export default function Home() {
   const [runLoading, setRunLoading] = useState(false)
   const [runStatus, setRunStatus] = useState('')
   const [activeTab, setActiveTab] = useState('Input')
-  const [testCases, setTestCases] = useState([
-    { id: 1, input: '2 7 11 15\n9', expected: '[0,1]', output: '', status: 'Pending' },
-    { id: 2, input: '3 2 4\n6', expected: '[1,2]', output: '', status: 'Pending' }
-  ])
-  const [activeCaseId, setActiveCaseId] = useState(1)
+  const [testCases, setTestCases] = useState([])
+  const [activeCaseId, setActiveCaseId] = useState(null)
   const [expanded, setExpanded] = useState({ description: true, constraints: true, examples: true })
   const [problem, setProblem] = useState(problemData)
   const [messages, setMessages] = useState([])
@@ -50,6 +45,7 @@ export default function Home() {
   const [problemUrl, setProblemUrl] = useState('https://codeforces.com/problemset/problem/4/A')
   const [syncLoading, setSyncLoading] = useState(false)
   const [lastSeenImportId, setLastSeenImportId] = useState('')
+  const [sessionId, setSessionId] = useState('')
 
   const layoutLeftWidth = rightPanelOpen ? leftWidth : 100
 
@@ -109,27 +105,44 @@ export default function Home() {
     }
   }
 
-  function runCode() {
+  async function runCode() {
     setRunLoading(true)
     setRunStatus('Running...')
-    window.setTimeout(() => {
+    try {
       if (testCases.length === 0) {
-        setRunLoading(false)
         setRunStatus('Error: No test cases')
         return
       }
-      const solvedLikely = /(hash|map|dict|unordered_map|return\s*\[)/i.test(code)
-      const next = testCases.map((item) => {
-        const passed = solvedLikely || item.id % 2 === 0
-        const output = passed ? item.expected : '[-1,-1]'
-        return { ...item, status: passed ? 'Passed' : 'Failed', output }
+      const res = await fetch('http://localhost:8000/api/code/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language,
+          code,
+          test_cases: testCases.map((item) => ({ id: item.id, input: item.input, expected: item.expected })),
+          timeout_seconds: 3
+        })
       })
-      const allPassed = next.every((item) => item.status === 'Passed')
+      if (!res.ok) throw new Error('Failed to run code')
+      const data = await res.json()
+      const byId = new Map((data.cases || []).map((item) => [item.id, item]))
+      const next = testCases.map((item) => {
+        const result = byId.get(item.id)
+        if (!result) return item
+        return {
+          ...item,
+          output: result.output || '',
+          status: result.status || 'Failed'
+        }
+      })
       setTestCases(next)
-      setRunLoading(false)
-      setRunStatus(allPassed ? 'Accepted' : 'Wrong Answer')
+      setRunStatus(data.error ? `Error: ${data.error}` : (data.status || 'Completed'))
       setActiveTab('Diff')
-    }, 1200)
+    } catch (error) {
+      setRunStatus(`Error: ${String(error)}`)
+    } finally {
+      setRunLoading(false)
+    }
   }
 
   function formatCode() {
@@ -184,6 +197,13 @@ export default function Home() {
 
   function applyImportedProblem(imported) {
     if (!imported) return
+    const importedExamples = (imported.examples || []).map((example, index) => ({
+      id: index + 1,
+      input: example.input || '',
+      expected: example.output || '',
+      output: '',
+      status: 'Pending'
+    }))
     const next = {
       title: imported.title || imported.id || 'Imported Problem',
       difficulty: imported.rating ? (imported.rating <= 1200 ? 'Easy' : imported.rating <= 1700 ? 'Medium' : 'Hard') : 'Medium',
@@ -195,6 +215,10 @@ export default function Home() {
         .join('\n\n') || imported.source_url || 'N/A'
     }
     setProblem(next)
+    setTestCases(importedExamples)
+    setActiveCaseId(importedExamples.length ? importedExamples[0].id : null)
+    setRunStatus('')
+    setActiveTab('Input')
     setExpanded({ description: true, constraints: true, examples: true })
   }
 
@@ -248,32 +272,40 @@ export default function Home() {
     return () => window.clearInterval(poll)
   }, [isFetchModalOpen, lastSeenImportId, problemUrl])
 
-  function streamAssistantResponse(prompt) {
-    setIsTyping(true)
-    const answer = `Here is a focused direction for: ${prompt}\n\n1. Use a hash map to track visited values.\n2. For each value x, check if target - x exists.\n3. Return indices immediately once found.\n\n\`\`\`python\ndef two_sum(nums, target):\n    seen = {}\n    for i, x in enumerate(nums):\n        if target - x in seen:\n            return [seen[target - x], i]\n        seen[x] = i\n\`\`\``
-
-    const id = Date.now() + 1
-    setMessages((prev) => [...prev, { id, role: 'assistant', content: '' }])
-    let index = 0
-    const timer = window.setInterval(() => {
-      index += 3
-      setMessages((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, content: answer.slice(0, index) } : item))
-      )
-      if (index >= answer.length) {
-        window.clearInterval(timer)
-        setIsTyping(false)
-      }
-    }, 20)
-  }
-
-  function sendChat(text) {
+  async function sendChat(text) {
     const prompt = text.trim()
     if (!prompt) return
     const userMessage = { id: Date.now(), role: 'user', content: prompt }
     setMessages((prev) => [...prev, userMessage])
     setChatInput('')
-    streamAssistantResponse(prompt)
+    setIsTyping(true)
+    try {
+      const res = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_input: prompt,
+          code,
+          session_id: sessionId || undefined,
+          user_data: {
+            problem_context: {
+              title: problem.title,
+              statement: problem.description,
+              constraints: problem.constraints
+            }
+          }
+        })
+      })
+      if (!res.ok) throw new Error('Chat request failed')
+      const data = await res.json()
+      if (data.session_id) setSessionId(data.session_id)
+      const content = data.final_response || 'No response generated.'
+      setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content }])
+    } catch (error) {
+      setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: `Error: ${String(error)}` }])
+    } finally {
+      setIsTyping(false)
+    }
   }
 
   function quickAction(label) {

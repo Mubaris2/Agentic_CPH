@@ -11,3 +11,4 @@ typing-extensions
 httpx
 psycopg[binary]
 openai
+langgraph
