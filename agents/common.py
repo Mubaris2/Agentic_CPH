@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Optional
-import json
 import re
+
+from app.utils import parse_json_object
 
 from state import State
 
@@ -109,30 +110,4 @@ def extract_approach(value: str | None) -> str:
     return "unknown"
 
 
-def parse_json_object(text: str | None) -> dict:
-    raw = (text or "").strip()
-    if not raw:
-        return {}
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
-    if fenced:
-        try:
-            obj = json.loads(fenced.group(1))
-            return obj if isinstance(obj, dict) else {}
-        except Exception:
-            return {}
-
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            obj = json.loads(raw[start:end + 1])
-            return obj if isinstance(obj, dict) else {}
-        except Exception:
-            return {}
-    return {}
+# parse_json_object is provided by `app.utils.parse_json_object`

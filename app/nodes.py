@@ -9,7 +9,8 @@ from .models import (
     IntermediateStep,
 )
 from .tools import fetch_codeforces_problem
-from .llm import chat_completion, parse_json_object
+from .llm import chat_completion
+from .utils import parse_json_object
 from .settings import settings
 
 NODE_MODELS = {

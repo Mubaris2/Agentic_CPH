@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from .settings import settings
 from .store import SessionStore, HistoryStore
 from .llm import _chat_completion_sync
+from .model_client import build_node_models
 from .code_runner import run_code
 from .tools import (
     search_codeforces_by_code_or_name,
@@ -150,26 +151,7 @@ async def startup_event():
             model_diag["last_error"] = str(error)
             return ""
 
-    node_models = {
-        "orchestrator": ModelRegistry(
-            intent_model=lambda prompt, state: _model_call(settings.MODEL_INTENT_DETECTION, prompt, state),
-        ),
-        "code_analyzer": ModelRegistry(
-            code_model=lambda prompt, state: _model_call(settings.MODEL_CODE_ANALYZER, prompt, state),
-        ),
-        "approach_detection": ModelRegistry(
-            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_APPROACH_DETECTOR, prompt, state),
-        ),
-        "approach_validator": ModelRegistry(
-            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_APPROACH_VALIDATOR, prompt, state),
-        ),
-        "hint_agent": ModelRegistry(
-            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_HINT_AGENT, prompt, state),
-        ),
-        "strategy_agent": ModelRegistry(
-            reasoning_model=lambda prompt, state: _model_call(settings.MODEL_STRATEGY_AGENT, prompt, state),
-        ),
-    }
+    node_models = build_node_models(lambda model_name, prompt, state: _model_call(model_name, prompt, state))
 
     g = build_graph(models=ModelRegistry(reasoning_model=lambda prompt, state: _model_call(settings.MODEL_GENERAL_CHAT, prompt, state)), node_models=node_models)
 

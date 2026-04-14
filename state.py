@@ -1,86 +1,43 @@
+"""Unified state shim for the application.
+
+This module re-exports the canonical assistant state type from
+`app.models` as `State` and provides `default_state()` to create a
+runtime-initialized state dictionary. Centralizing here keeps older
+callers that import `state.State` working while consolidating the
+schema in `app.models`.
+"""
+
 from __future__ import annotations
 
-from typing import Optional, TypedDict, Literal, Any
+from typing import Optional
 
-Intent = Literal["hint", "strategy", "analyze", "general"]
-Approach = Literal[
-    "unknown",
-    "dp",
-    "greedy",
-    "brute_force",
-    "graph",
-    "math",
-    "binary_search",
-    "two_pointers",
-    "prefix_sum",
-    "string",
-    "backtracking",
-]
+from app.models import CPAssistantState as StateType
 
 
-class ProblemContext(TypedDict, total=False):
-    title: str
-    statement: str
-    constraints: str
-
-
-class Intervention(TypedDict, total=False):
-    warning: str
-    hint: str
-    counterexample: Optional[str]
-
-
-class ValidationResult(TypedDict, total=False):
-    status: Literal["match", "mismatch"]
-    reason: str
-    confidence: float
-    intervention: Intervention
-
-
-class State(TypedDict, total=False):
-    user_input: str
-    code: Optional[str]
-    intent: Optional[Intent]
-
-    problem_context: ProblemContext
-
-    analysis_result: Optional[str]
-    detected_approach: Optional[Approach]
-    expected_approach: Optional[Approach]
-    validation_result: Optional[ValidationResult]
-
-    hints: Optional[list[str]]
-    strategy: Optional[str]
-
-    final_response: Optional[str]
-
-    run_parallel_strategy: bool
-    model_usage: dict[str, Any]
-    trainer_profile: Optional[str]
-    coaching_goal: Optional[str]
-    memory_notes: Optional[list[str]]
-
-
-def default_state(user_input: str, code: Optional[str] = None, problem_context: Optional[ProblemContext] = None) -> State:
+def default_state(user_input: str, code: Optional[str] = None, problem_context: Optional[dict] = None) -> StateType:
     return {
         "user_input": user_input,
         "code": code,
-        "intent": None,
-        "problem_context": problem_context or {
-            "title": "",
-            "statement": "",
-            "constraints": "",
-        },
-        "analysis_result": None,
-        "detected_approach": None,
-        "expected_approach": None,
-        "validation_result": None,
-        "hints": None,
-        "strategy": None,
-        "final_response": None,
+        "intent": "general",
+        "next_node": "",
+        "problem_fetch_attempted": False,
+        "problem_context": problem_context or {"title": "", "statement": "", "constraints": ""},
+        "problem_candidates": [],
+        "analysis_result": {},
+        "detected_approach": "unknown",
+        "expected_approach": "unknown",
+        "validation_result": {},
+        "hints": [],
+        "strategy": {},
+        "counterexample": "",
+        "final_response": "",
+        "intermediate_steps": [],
         "run_parallel_strategy": True,
         "model_usage": {},
         "trainer_profile": "Supportive personal CP trainer",
         "coaching_goal": "Improve one concept and one implementation habit in each session.",
         "memory_notes": [],
     }
+
+# export State name for backwards compatibility
+State = StateType
