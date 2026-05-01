@@ -1,3 +1,4 @@
+
 # Python
 __pycache__/
 *.py[cod]
@@ -6,6 +7,7 @@ __pycache__/
 .Python
 env/
 .venv/
+venv/
 build/
 dist/
 *.egg-info/
@@ -13,6 +15,7 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .pyre/
+pip-wheel-metadata/
 
 # Virtual environment variable files
 .env
@@ -24,22 +27,44 @@ dist/
 .idea/
 *.sublime-workspace
 *.sublime-project
+.project
+*.iml
 
 # OS files
 .DS_Store
 Thumbs.db
+Icon\r
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Logs
 *.log
-cache/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+logs/
 
-# Node (web/)
+# Caches
+.cache/
+.parcel-cache/
+.cache-loader/
+
+# Node / JavaScript
+node_modules/
+**/node_modules/
+
+# Web / desktop specific
 /web/node_modules/
 /web/.next/
 /web/out/
 /web/build/
 /web/.cache/
 /web/.vercel/
+/desktop/node_modules/
+/desktop/dist/
+/desktop/build/
 
 # Next.js environment files
 /web/.env.local
@@ -52,6 +77,7 @@ cache/
 *.db
 coverage/
 coverage.*
+.tox/
 
 # Temporary CF/CFTOOL and other runtime dirs
 .tmp*
@@ -59,7 +85,3 @@ coverage.*
 
 # Local database
 cp_assistant.db
-
-# IDE / OS extras
-.DS_Store
-Thumbs.db
