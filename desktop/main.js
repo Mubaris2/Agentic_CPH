@@ -4,6 +4,8 @@ const fs = require('fs/promises')
 const os = require('os')
 const { exec } = require('child_process')
 
+const API_BASE = process.env.VITE_API_BASE || 'http://localhost:8001'
+
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173'
 
 function quotePath(value) {
@@ -115,6 +117,8 @@ ipcMain.handle('open-external', async (_event, payload) => {
   }
 })
 
+ipcMain.handle('get-api-base', () => API_BASE)
+
 ipcMain.handle('select-working-directory', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
   if (result.canceled || !result.filePaths?.length) return null
@@ -156,7 +160,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Allow file:// pages to fetch http://localhost:* without CORS errors.
+      // Safe because this app only talks to the local FastAPI backend.
+      webSecurity: false
     }
   })
 

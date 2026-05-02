@@ -365,7 +365,6 @@ body {
   padding: 10px;
   font-size: 12px;
   color: #cbd5f5;
-  white-space: pre-wrap;
 }
 
 .link-button {
@@ -539,6 +538,138 @@ body {
 .error-text {
   color: #fca5a5;
   font-size: 12px;
+}
+
+/* ── Problem analyzer styles ─────────────────────────────────────── */
+
+.analysis-badge {
+  font-size: 10px;
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 6px;
+  animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+.analyzing-tag {
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+  animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* Constraint bullet list */
+.constraint-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.constraint-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: #c4d0e8;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.constraint-list li::before {
+  content: '•';
+  color: #38bdf8;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* pre-formatted fallback */
+.pre-wrap {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12px;
+  color: #c4d0e8;
+}
+
+/* Description prose */
+.description-text {
+  margin: 0;
+  font-size: 12px;
+  color: #c4d0e8;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* Example cards */
+.example-blocks {
+  display: grid;
+  gap: 10px;
+}
+
+.example-card {
+  border: 1px solid #1e3052;
+  border-radius: 10px;
+  background: rgba(10, 16, 28, 0.7);
+  overflow: hidden;
+}
+
+.example-label {
+  background: rgba(30, 48, 82, 0.6);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #93c5fd;
+  border-bottom: 1px solid #1e3052;
+}
+
+.example-io {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1a2540;
+}
+
+.example-io:last-child,
+.example-note:last-child {
+  border-bottom: none;
+}
+
+.io-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.io-pre {
+  margin: 0;
+  font-family: "Fira Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+}
+
+.example-note {
+  padding: 8px 10px;
+}
+
+.example-note p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
 }
 
 @media (max-width: 980px) {

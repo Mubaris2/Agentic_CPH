@@ -5,7 +5,15 @@ import FetchModal from './components/FetchModal.jsx'
 import ProblemPanel from './components/ProblemPanel.jsx'
 import TestCasePanel from './components/TestCasePanel.jsx'
 
-const API_BASE = 'http://localhost:8000'
+// In Electron packaged builds, VITE_API_BASE is not baked in via import.meta.env.
+// We resolve it at runtime from the main process via IPC (window.cpAPI.getApiBase).
+// In the web app (Next.js / Vite dev), we use the env variable directly.
+let API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8001'
+if (window.cpAPI?.getApiBase) {
+  window.cpAPI.getApiBase().then((base) => {
+    if (base) API_BASE = base
+  })
+}
 
 const problemData = {
   id: '',
@@ -92,6 +100,7 @@ export default function App() {
   const [randomLoading, setRandomLoading] = useState(false)
   const [fetcherError, setFetcherError] = useState('')
   const [selectedProblem, setSelectedProblem] = useState(null)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
 
   const layoutLeftWidth = rightPanelOpen ? leftWidth : 100
 
@@ -343,6 +352,36 @@ export default function App() {
     setExpanded({ description: true, constraints: true, examples: true })
   }
 
+  async function analyzeProblemStatement(problemData) {
+    setAnalysisLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/problems/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: problemData.title || '',
+          statement: problemData.description || '',
+          constraints: problemData.constraints || '',
+          examples: problemData.examples || ''
+        })
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const parsed = data?.parsed
+      if (!parsed) return
+      setProblem((prev) => ({
+        ...prev,
+        description: parsed.description || prev.description,
+        constraints: parsed.constraints || prev.constraints,
+        examples: parsed.examples || prev.examples
+      }))
+    } catch {
+      // silently ignore – the raw data is already loaded
+    } finally {
+      setAnalysisLoading(false)
+    }
+  }
+
   function applyImportedProblem(imported) {
     if (!imported) return
     const importedExamples = (imported.examples || []).map((example, index) => ({
@@ -376,6 +415,7 @@ export default function App() {
     }
     applyProblemData(next, importedExamples)
     saveProblemSnapshot(next, importedExamples)
+    analyzeProblemStatement(next)
   }
 
   async function syncLatestImportedProblem(options = { silent: false, closeOnSuccess: false }) {
@@ -613,6 +653,7 @@ export default function App() {
           }
           applyProblemData(problemData, cases)
           saveProblemSnapshot(problemData, cases)
+          analyzeProblemStatement(problemData)
         }
       } catch (error) {
         setFetcherError(String(error))
@@ -689,6 +730,7 @@ export default function App() {
                         setFetchError('')
                         setIsFetchModalOpen(true)
                       }}
+                      analysisLoading={analysisLoading}
                     />
                   ) : (
                     <section className="panel shell">
