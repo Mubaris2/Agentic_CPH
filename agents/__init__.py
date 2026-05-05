@@ -5,6 +5,7 @@ from .approach_validator import approach_validator_node
 from .hint_agent import hint_agent_node
 from .strategy_agent import strategy_agent_node
 from .aggregator import response_aggregator_node
+from .problem_analyzer import problem_analyzer_node, analyze_problem
 
 __all__ = [
     "orchestrator_node",
@@ -14,4 +15,6 @@ __all__ = [
     "hint_agent_node",
     "strategy_agent_node",
     "response_aggregator_node",
+    "problem_analyzer_node",
+    "analyze_problem",
 ]

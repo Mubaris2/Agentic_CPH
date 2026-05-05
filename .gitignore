@@ -85,3 +85,6 @@ coverage.*
 
 # Local database
 cp_assistant.db
+
+# Caches
+cache/

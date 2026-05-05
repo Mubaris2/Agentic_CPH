@@ -3,7 +3,9 @@ import ChatPanel from './components/ChatPanel.jsx'
 import EditorPanel from './components/EditorPanel.jsx'
 import FetchModal from './components/FetchModal.jsx'
 import ProblemPanel from './components/ProblemPanel.jsx'
+import Sidebar from './components/Sidebar.jsx'
 import TestCasePanel from './components/TestCasePanel.jsx'
+import UserModal from './components/UserModal.jsx'
 
 // In Electron packaged builds, VITE_API_BASE is not baked in via import.meta.env.
 // We resolve it at runtime from the main process via IPC (window.cpAPI.getApiBase).
@@ -101,6 +103,64 @@ export default function App() {
   const [fetcherError, setFetcherError] = useState('')
   const [selectedProblem, setSelectedProblem] = useState(null)
   const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
+  // ── User mechanics ──────────────────────────────────────────────────────
+  const [currentUser, setCurrentUser] = useState(null)
+  const [solvedProblems, setSolvedProblems] = useState([])
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false)
+
+  // Persist current user across app restarts in localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('cp_current_user')
+    if (saved) {
+      try { setCurrentUser(JSON.parse(saved)) } catch { /* ignore */ }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('cp_current_user', JSON.stringify(currentUser))
+      // Refresh solved problems from backend
+      fetch(`${API_BASE}/api/users/${currentUser.id}/solved?limit=30`)
+        .then((r) => r.json())
+        .then((d) => setSolvedProblems(d.solved || []))
+        .catch(() => { })
+    } else {
+      localStorage.removeItem('cp_current_user')
+      setSolvedProblems([])
+    }
+  }, [currentUser])
+
+  async function markAsSolved(problemData) {
+    if (!currentUser || !problemData?.id) return
+    try {
+      const res = await fetch(`${API_BASE}/api/users/${currentUser.id}/solved`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problem_id: problemData.id,
+          title: problemData.title || '',
+          platform: 'codeforces',
+          rating: problemData.difficulty === 'Easy' ? 1000
+            : problemData.difficulty === 'Medium' ? 1500 : 2000,
+          tags: problemData.tags || [],
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setSolvedProblems((prev) => {
+          const filtered = prev.filter((p) => p.problem_id !== data.solved.problem_id)
+          return [data.solved, ...filtered]
+        })
+        // Refresh user stats
+        fetch(`${API_BASE}/api/users/${currentUser.id}`)
+          .then((r) => r.json())
+          .then((d) => setCurrentUser(d.user))
+          .catch(() => { })
+      }
+    } catch { /* silently ignore */ }
+  }
 
   const layoutLeftWidth = rightPanelOpen ? leftWidth : 100
 
@@ -138,7 +198,7 @@ export default function App() {
         const viewportH = window.innerHeight
         if (type === 'main-split') {
           const next = (moveEvent.clientX / viewportW) * 100
-          setLeftWidth(Math.max(50, Math.min(85, next)))
+          setLeftWidth(Math.max(15, Math.min(85, next)))
           return
         }
         if (type === 'left-split') {
@@ -205,20 +265,24 @@ export default function App() {
       const data = await res.json()
       const byId = new Map((data.cases || []).map((item) => [item.id, item]))
       setCompileError(data.compile_error || '')
-      setTestCases((prev) =>
-        prev.map((item) => {
-          const result = byId.get(item.id)
-          if (!result) return item
-          return {
-            ...item,
-            output: result.output || '',
-            status: result.status || 'Failed',
-            error: result.error || ''
-          }
-        })
-      )
+      const updatedCases = testCases.map((item) => {
+        const result = byId.get(item.id)
+        if (!result) return item
+        return {
+          ...item,
+          output: result.output || '',
+          status: result.status || 'Failed',
+          error: result.error || ''
+        }
+      })
+      setTestCases(updatedCases)
       setRunStatus(data.error ? `Error: ${data.error}` : data.status || 'Completed')
       setActiveTab('Diff')
+
+      // Mark as solved if all test cases passed
+      if (updatedCases.length > 0 && updatedCases.every((c) => c.status === 'Passed')) {
+        markAsSolved(problem)
+      }
     } catch (error) {
       setRunStatus(`Error: ${String(error)}`)
     } finally {
@@ -468,12 +532,47 @@ export default function App() {
     return () => window.clearInterval(poll)
   }, [isFetchModalOpen, lastSeenImportId, problemUrl])
 
+  const [hintLevel, setHintLevel] = useState(0)
+
   async function sendChat(text) {
     const prompt = text.trim()
     if (!prompt) return
     const userMessage = { id: Date.now(), role: 'user', content: prompt }
     setMessages((prev) => [...prev, userMessage])
     setChatInput('')
+
+    const lowerPrompt = prompt.toLowerCase()
+    let hintsToPass = null
+
+    if (lowerPrompt.includes('hint')) {
+      let level = hintLevel + 1
+      if (lowerPrompt.includes('2')) level = 2
+      if (lowerPrompt.includes('3')) level = 3
+      if (level > 3) level = 3
+      setHintLevel(level)
+
+      // Placeholder hint agent output
+      const raw = `{
+          "hints": [
+              {"level": 1, "text": "Start by deriving the target time complexity from constraints."},
+              {"level": 2, "text": "Consider using a more optimal data structure or dynamic programming."},
+              {"level": 3, "text": "Think about defining a state to track the progress optimally over iterations."}
+          ]
+      }`
+      const obj = JSON.parse(raw)
+      const hints = obj.hints.filter(h => h.level <= level).map(h => h.text)
+      hintsToPass = hints
+
+      // Add hint message locally immediately
+      const assistantMessage = {
+        id: Date.now() + 1, role: 'assistant', content: `**Hints:**\n${hints.map((h, i) => `${i + 1}. ${h}`).join('\n')}`
+      }
+      setMessages((prev) => [...prev, assistantMessage])
+      
+      // We return early since the hint agent handles this locally
+      return
+    }
+
     setIsTyping(true)
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
@@ -488,7 +587,9 @@ export default function App() {
               title: problem.title,
               statement: problem.description,
               constraints: problem.constraints
-            }
+            },
+            // Pass user profile so the backend can personalise coaching
+            user_profile: currentUser || null,
           }
         })
       })
@@ -626,7 +727,7 @@ export default function App() {
           const constraints = [detail.time_limit, detail.memory_limit]
             .filter(Boolean)
             .join(' | ') ||
-            (detail.rating ? `rating=${detail.rating}` : '')
+            (detail.rating ? `rating = ${detail.rating}` : '')
           const examplesText = formatExamples(detail.examples)
           const cases = (detail.examples || []).map((example, idx) => ({
             id: idx + 1,
@@ -669,8 +770,19 @@ export default function App() {
 
   return (
     <main className="app-root">
+      {/* ── Sidebar ───────────────────────────────────────────────── */}
+      <Sidebar
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        currentUser={currentUser}
+        solvedProblems={solvedProblems}
+        workingDir={workingDir}
+        onOpenUserModal={() => setIsUserModalOpen(true)}
+        onSelectWorkingDirectory={selectWorkingDirectory}
+      />
+
       <div className="layout">
-        <div className="pane" style={{ width: `${layoutLeftWidth}%` }}>
+        <div className="pane" style={{ width: `calc(${layoutLeftWidth}% - 9px)` }}>
           <div className="stack">
             <div className="stack-item" style={{ height: `${leftTopHeight}%` }}>
               <EditorPanel
@@ -693,6 +805,7 @@ export default function App() {
                 }}
                 onFormatCode={formatCode}
                 onClearTestCases={clearTestCases}
+                onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
               />
             </div>
 
@@ -717,9 +830,9 @@ export default function App() {
         {rightPanelOpen && (
           <>
             <div className="drag-handle vertical" onMouseDown={beginDrag('main-split')} />
-            <div className="pane" style={{ width: `${100 - leftWidth}%` }}>
+            <div className="pane" style={{ width: `calc(${100 - leftWidth}% - 9px)` }}>
               <div className="stack">
-                <div className="stack-item" style={{ height: `${rightTopHeight}%` }}>
+                <div className="stack-item" style={{ height: `${ rightTopHeight }% ` }}>
                   {workingDir ? (
                     <ProblemPanel
                       problem={problem}
@@ -756,7 +869,7 @@ export default function App() {
 
                 <div className="drag-handle horizontal" onMouseDown={beginDrag('right-split')} />
 
-                <div className="stack-item" style={{ height: `${100 - rightTopHeight}%` }}>
+                <div className="stack-item" style={{ height: `${ 100 - rightTopHeight }% ` }}>
                   <ChatPanel
                     messages={messages}
                     chatInput={chatInput}
@@ -813,6 +926,14 @@ export default function App() {
         fetchError={fetchError}
         fetcherError={fetcherError}
         selectedProblem={selectedProblem}
+      />
+
+      <UserModal
+        isOpen={isUserModalOpen}
+        onClose={() => setIsUserModalOpen(false)}
+        currentUser={currentUser}
+        onSelectUser={(user) => setCurrentUser(user)}
+        apiBase={API_BASE}
       />
     </main>
   )

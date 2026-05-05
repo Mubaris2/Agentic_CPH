@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from .settings import settings
 from .store import SessionStore, HistoryStore
+from .user_store import UserStore
 from .llm import _chat_completion_sync
 from .model_client import build_node_models
 from .code_runner import run_code
@@ -27,6 +28,7 @@ from .problem_import_store import (
 from state import default_state, State
 from graph import build_graph
 from agents.common import ModelRegistry
+from agents.problem_analyzer import analyze_problem
 
 app = FastAPI(title="LangGraph CP Assistant - Demo")
 
@@ -36,10 +38,14 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "https://codeforces.com",
         "https://www.codeforces.com",
+        # Electron packaged app loads from file:// origin
+        "file://",
     ],
-    allow_origin_regex=r"chrome-extension://.*",
+    allow_origin_regex=r"(chrome-extension://.*|http://localhost:\d+|http://127\.0\.0\.1:\d+)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -115,6 +121,33 @@ class ImportProblemRequest(BaseModel):
     created_at: str | None = None
 
 
+class CreateUserRequest(BaseModel):
+    username: str
+
+
+class UpdateUserRequest(BaseModel):
+    username: str | None = None
+    strengths: list[str] | None = None
+    weaknesses: list[str] | None = None
+    stats: dict | None = None
+
+
+class AddSolvedRequest(BaseModel):
+    problem_id: str
+    title: str = ""
+    platform: str = "codeforces"
+    rating: int | None = None
+    tags: list[str] = []
+
+
+class ProblemAnalyzeRequest(BaseModel):
+    title: str = ""
+    statement: str = ""
+    constraints: str = ""
+    examples: str = ""  # pre-formatted string from the frontend
+    rating: int | None = None
+
+
 @app.on_event("startup")
 async def startup_event():
     model_diag = {
@@ -170,8 +203,12 @@ async def startup_event():
     history_store = HistoryStore(settings.DATABASE_URL)
     history_store.init_db()
 
+    user_store = UserStore(settings.DATABASE_URL)
+    user_store.init_db()
+
     app.state.session_store = session_store
     app.state.history_store = history_store
+    app.state.user_store = user_store
 
 
 @app.post("/api/chat")
@@ -190,6 +227,25 @@ async def chat(req: ChatRequest):
                 "statement": str(incoming_context.get("statement", "")),
                 "constraints": str(incoming_context.get("constraints", "")),
             }
+
+        # Inject user profile into coaching context so the LLM can personalise
+        user_profile = req.user_data.get("user_profile")
+        if isinstance(user_profile, dict) and user_profile.get("username"):
+            strengths = ", ".join(user_profile.get("strengths") or []) or "not specified"
+            weaknesses = ", ".join(user_profile.get("weaknesses") or []) or "not specified"
+            stats = user_profile.get("stats") or {}
+            solved = stats.get("problems_solved", 0)
+            state["trainer_profile"] = (
+                f"Personal CP coach for {user_profile['username']}. "
+                f"Their strengths: {strengths}. "
+                f"Their weaknesses: {weaknesses}. "
+                f"Problems solved so far: {solved}."
+            )
+            state["coaching_goal"] = (
+                "Target the user's weak areas in hints and explanations. "
+                "Reinforce their strengths. "
+                "Keep responses concise and actionable."
+            )
 
     # load prior session context (best-effort)
     prior = await session_store.get(session_id)
@@ -236,6 +292,82 @@ async def chat(req: ChatRequest):
         "state": encoded_state,
         "recent_history": history_store.get_recent_turns(session_id=session_id, limit=3),
     }
+
+
+# ---------------------------------------------------------------------------
+# User management endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/users")
+async def list_users():
+    user_store: UserStore = app.state.user_store
+    return {"users": user_store.list_users()}
+
+
+@app.post("/api/users", status_code=201)
+async def create_user(req: CreateUserRequest):
+    user_store: UserStore = app.state.user_store
+    existing = user_store.get_user_by_name(req.username.strip())
+    if existing:
+        raise HTTPException(status_code=409, detail="Username already taken")
+    user = user_store.create_user(req.username.strip())
+    return {"user": user}
+
+
+@app.get("/api/users/{user_id}")
+async def get_user(user_id: int):
+    user_store: UserStore = app.state.user_store
+    user = user_store.get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user": user}
+
+
+@app.patch("/api/users/{user_id}")
+async def update_user(user_id: int, req: UpdateUserRequest):
+    user_store: UserStore = app.state.user_store
+    user = user_store.update_user(
+        user_id,
+        username=req.username,
+        strengths=req.strengths,
+        weaknesses=req.weaknesses,
+        stats=req.stats,
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user": user}
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+async def delete_user(user_id: int):
+    user_store: UserStore = app.state.user_store
+    ok = user_store.delete_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
+@app.get("/api/users/{user_id}/solved")
+async def get_solved_problems(user_id: int, limit: int = 50):
+    user_store: UserStore = app.state.user_store
+    if not user_store.get_user(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"solved": user_store.get_solved_problems(user_id, limit=limit)}
+
+
+@app.post("/api/users/{user_id}/solved", status_code=201)
+async def add_solved_problem(user_id: int, req: AddSolvedRequest):
+    user_store: UserStore = app.state.user_store
+    if not user_store.get_user(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+    sp = user_store.add_solved_problem(
+        user_id,
+        problem_id=req.problem_id,
+        title=req.title,
+        platform=req.platform,
+        rating=req.rating,
+        tags=req.tags,
+    )
+    return {"solved": sp}
 
 
 @app.get("/api/debug/model-map")
@@ -324,18 +456,20 @@ async def import_problem(req: ImportProblemRequest):
     return {"item": saved}
 
 
+# NOTE: /latest must be declared BEFORE /{problem_id} so FastAPI doesn't
+# treat the literal string "latest" as a problem_id path parameter.
+@app.get("/api/problems/import/latest")
+async def latest_imported_problem():
+    item = load_latest_problem()
+    return {"item": item}
+
+
 @app.get("/api/problems/import/{problem_id}")
 async def get_imported_problem(problem_id: str):
     normalized = problem_id.strip().replace("-", "_")
     if not normalized:
         raise HTTPException(status_code=400, detail="Invalid problem id")
     return {"item": load_problem(normalized)}
-
-
-@app.get("/api/problems/import/latest")
-async def latest_imported_problem():
-    item = load_latest_problem()
-    return {"item": item}
 
 
 @app.post("/api/code/run")
@@ -348,3 +482,47 @@ async def code_run(req: CodeRunRequest):
         max(1, min(req.timeout_seconds, 8)),
     )
     return result
+
+
+@app.post("/api/problems/analyze")
+async def analyze_problem_endpoint(req: ProblemAnalyzeRequest):
+    """Run the problem-analyzer agent to split a raw problem into
+    description, constraints, and examples in a more readable form.
+
+    Uses a placeholder LLM agent (same model registry as the rest of the app).
+    Falls back to heuristic parsing if the model is unavailable.
+    """
+    models = getattr(app.state, "graph", None) and ModelRegistry(
+        reasoning_model=lambda prompt, state: _app_model_call(prompt, state)
+    )
+
+    parsed = await asyncio.to_thread(
+        analyze_problem,
+        req.title,
+        req.statement,
+        req.constraints,
+        req.examples,
+        None,   # no full LangGraph state needed
+        models,
+    )
+    return {"parsed": parsed}
+
+
+def _app_model_call(prompt: str, state) -> str:
+    """Thin wrapper so the endpoint can reuse the app-level LLM."""
+    diag = getattr(app.state, "model_diagnostics", {})
+    if not diag.get("api_key_configured"):
+        return ""
+    try:
+        from .llm import _chat_completion_sync
+        from .settings import settings
+        return _chat_completion_sync(
+            model=settings.MODEL_GENERAL_CHAT,
+            messages=[
+                {"role": "system", "content": "You are a competitive programming assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=1200,
+        )
+    except Exception:
+        return ""

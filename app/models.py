@@ -62,6 +62,7 @@ class CPAssistantState(TypedDict, total=False):
     counterexample: str
     final_response: str
     intermediate_steps: List[IntermediateStep]
+    parsed_problem: Dict[str, str]  # keys: description, constraints, examples
 
 
 def init_state(user_input: str, code: Optional[str] = None, user_data: Optional[Dict[str, Any]] = None) -> CPAssistantState:
